@@ -16,6 +16,28 @@ export class ContactAdapter implements ContactRepositoryInterface {
         }
         const contactRepository = AppDataSource.getRepository(Contact);
 
+        const existingContactByEmail = await this.getAllByEmail(email);
+        const existingContactByPhoneNumber = await this.getAllByPhone(phoneNumber);
+
+          if(existingContactByEmail && existingContactByPhoneNumber){
+    // Check if any email in existingContactByEmail is present in existingContactByPhoneNumber
+            // const matchingContact = existingContactByEmail.find(contactByEmail => 
+            //     existingContactByPhoneNumber.some(contactByPhone => contactByPhone.email === contactByEmail.email)
+            // );
+            if(existingContactByEmail==existingContactByPhoneNumber){
+                return;
+            }
+
+          
+        }
+        
+
+
+
+
+
+
+
         const contacts = await this.getAllContacts();
         console.log("--contacts----", contacts);
 
@@ -23,10 +45,20 @@ export class ContactAdapter implements ContactRepositoryInterface {
 
         for (const existingContact of contacts) {
             if (
+                existingContact.email == email &&
+                email !== null &&
+                existingContact.phoneNumber == phoneNumber &&
+                phoneNumber !== null
+            ) {
+                matchedContacts.push(existingContact);
+                break;
+            } else if (
                 (existingContact.email == email && email !== null) ||
                 (existingContact.phoneNumber == phoneNumber &&
                     phoneNumber !== null)
             ) {
+                if (existingContact.linkPrecedence === Status.primary) {
+                }
                 matchedContacts.push(existingContact);
             }
         }
@@ -59,7 +91,7 @@ export class ContactAdapter implements ContactRepositoryInterface {
                             .filter((email) => email !== null)
                     ),
                 ];
-                emails.push(email);
+                // emails.push(email);
                 let phoneNumbers = [
                     ...new Set(
                         matchedContacts
@@ -69,7 +101,7 @@ export class ContactAdapter implements ContactRepositoryInterface {
                             .filter((phone) => phone !== null)
                     ),
                 ];
-                phoneNumbers.push(phoneNumber);
+                // phoneNumbers.push(phoneNumber);
 
                 let secondaryContactIds = matchedContacts.map(
                     (existingContact) => existingContact.id
@@ -130,4 +162,17 @@ export class ContactAdapter implements ContactRepositoryInterface {
         const contactRepository = AppDataSource.getRepository(Contact);
         return await contactRepository.find();
     }
+
+    async getAllByEmail(email: string): Promise<Contact> {
+        if(!email) return;
+        const contactRepository = AppDataSource.getRepository(Contact);
+        return await contactRepository.findOneBy({email} );
+    }
+
+    async getAllByPhone(phoneNumber: string): Promise<Contact> {
+        if (!phoneNumber) return;
+        const contactRepository = AppDataSource.getRepository(Contact);
+        return await contactRepository.findOneBy({phoneNumber} );
+    }
+
 }
