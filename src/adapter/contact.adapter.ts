@@ -10,36 +10,90 @@ import {
 export class ContactAdapter implements ContactRepositoryInterface {
     async identify(contact: ContactInterface): Promise<ResponseInterface> {
         const { email, phoneNumber } = contact;
+        console.log(contact);
+        let primaryId = null;
+        let flag = false;
 
         if (!email && !phoneNumber) {
             throw new Error("Either email or phone number must be provided.");
         }
         const contactRepository = AppDataSource.getRepository(Contact);
 
-        const existingContactByEmail = await this.getAllByEmail(email);
-        const existingContactByPhoneNumber = await this.getAllByPhone(phoneNumber);
+        const existingContactByEmail = await this.getByEmail(email);
+        const existingContactByPhoneNumber = await this.getByPhone(phoneNumber);
+        console.log(
+            "ContactAdapter afterfinds",
+            existingContactByEmail,
+            existingContactByPhoneNumber
+        );
 
-          if(existingContactByEmail && existingContactByPhoneNumber){
-    // Check if any email in existingContactByEmail is present in existingContactByPhoneNumber
-            // const matchingContact = existingContactByEmail.find(contactByEmail => 
-            //     existingContactByPhoneNumber.some(contactByPhone => contactByPhone.email === contactByEmail.email)
-            // );
-            if(existingContactByEmail==existingContactByPhoneNumber){
-                return;
+        if (existingContactByEmail && existingContactByPhoneNumber) {
+            flag = true;
+            if (existingContactByEmail == existingContactByPhoneNumber) {
+                // do nothing
+            } else if (
+                existingContactByEmail.id < existingContactByPhoneNumber.id
+            ) {
+                await this.updateSecondaryContact(
+                    existingContactByEmail.id,
+                    existingContactByPhoneNumber
+                );
+            } else {
+                await this.updateSecondaryContact(
+                    existingContactByPhoneNumber.id,
+                    existingContactByEmail
+                );
             }
+        } else if (existingContactByEmail) {
+            if (existingContactByEmail.linkPrecedence === Status.primary) {
+                primaryId = existingContactByEmail.id;
+            } else {
+                primaryId = existingContactByEmail.linkedId;
+            }
+        } else if (existingContactByPhoneNumber) {
+            if (
+                existingContactByPhoneNumber.linkPrecedence === Status.primary
+            ) {
+                primaryId = existingContactByPhoneNumber.id;
+            } else {
+                primaryId = existingContactByPhoneNumber.linkedId;
+            }
+        } else {
+            const newContact = new Contact();
+            newContact.email = email;
+            newContact.phoneNumber = phoneNumber;
+            newContact.createdAt = new Date();
+            newContact.updatedAt = new Date();
+            newContact.linkPrecedence = Status.primary;
 
-          
+            const res = await contactRepository.save(newContact);
+
+            return {
+                contact: {
+                    primaryContactId: res.id,
+                    emails: res.email ? [res.email] : [],
+                    phoneNumbers: res.phoneNumber ? [res.phoneNumber] : [],
+                    secondaryContactIds: [],
+                },
+            };
         }
-        
 
+        // Save updated primary and secondary contacts
+        if (flag != true) {
+            const newContact = new Contact();
+            newContact.email = email ? email : null;
+            newContact.phoneNumber = phoneNumber ? phoneNumber : null;
+            newContact.linkedId = primaryId;
+            newContact.createdAt = new Date();
+            newContact.updatedAt = new Date();
+            newContact.linkPrecedence = Status.secondary;
 
+            let sec = await contactRepository.save(newContact);
+            console.log(sec);
+        }
 
-
-
-
-
+        // get the primary contact and and with linkedprecedence of primary contact
         const contacts = await this.getAllContacts();
-        console.log("--contacts----", contacts);
 
         let matchedContacts: Contact[] = [];
 
@@ -67,23 +121,6 @@ export class ContactAdapter implements ContactRepositoryInterface {
 
         if (matchedContacts) {
             try {
-                let saveContact: ContactInterface = {};
-
-                console.log("-----saveContact------", saveContact);
-                // Find primary contact
-                for (const existingContact of matchedContacts) {
-                    console.log("-------existingContact----", existingContact);
-                    if (existingContact.linkPrecedence == Status.primary) {
-                        saveContact.linkedId = existingContact.id
-                            ? existingContact.id
-                            : null;
-                        saveContact.linkPrecedence = Status.secondary;
-                        break;
-                    }
-                }
-
-                console.log("--saveContact----", saveContact);
-
                 let emails = [
                     ...new Set(
                         matchedContacts
@@ -107,26 +144,9 @@ export class ContactAdapter implements ContactRepositoryInterface {
                     (existingContact) => existingContact.id
                 );
 
-                // Save updated primary and secondary contacts
-                const primaryDB = new Contact();
-                primaryDB.id = saveContact.id;
-                primaryDB.email = email ? email : null;
-                primaryDB.phoneNumber = phoneNumber ? phoneNumber : null;
-                primaryDB.linkedId = saveContact.linkedId
-                    ? saveContact.linkedId
-                    : null;
-                primaryDB.createdAt = saveContact.createdAt
-                    ? saveContact.createdAt
-                    : new Date();
-                primaryDB.updatedAt = new Date();
-
-                let sec = await contactRepository.save(primaryDB);
-                secondaryContactIds.push(sec.id);
-                console.log(sec);
-
                 return {
                     contact: {
-                        primaryContactId: saveContact.linkedId,
+                        primaryContactId: primaryId,
                         emails: emails,
                         phoneNumbers: phoneNumbers,
                         secondaryContactIds: secondaryContactIds,
@@ -135,27 +155,18 @@ export class ContactAdapter implements ContactRepositoryInterface {
             } catch (error) {
                 console.log(error);
             }
-        } else {
-            // Create a new primary contact
-
-            const newContact = new Contact();
-            newContact.email = email;
-            newContact.phoneNumber = phoneNumber;
-            newContact.createdAt = new Date();
-            newContact.updatedAt = new Date();
-            newContact.linkPrecedence = Status.primary;
-
-            const res = await contactRepository.save(newContact);
-
-            return {
-                contact: {
-                    primaryContactId: res.id,
-                    emails: res.email ? [res.email] : [],
-                    phoneNumbers: res.phoneNumber ? [res.phoneNumber] : [],
-                    secondaryContactIds: [],
-                },
-            };
         }
+    }
+
+    async updateSecondaryContact(
+        primaryId: number,
+        updateContact: Contact
+    ): Promise<void> {
+        const contactRepository = AppDataSource.getRepository(Contact);
+        updateContact.linkPrecedence = Status.secondary;
+        updateContact.updatedAt = new Date();
+        updateContact.linkedId = primaryId;
+        await contactRepository.save(updateContact);
     }
 
     async getAllContacts(): Promise<Contact[]> {
@@ -163,16 +174,15 @@ export class ContactAdapter implements ContactRepositoryInterface {
         return await contactRepository.find();
     }
 
-    async getAllByEmail(email: string): Promise<Contact> {
-        if(!email) return;
+    async getByEmail(email: string): Promise<Contact> {
+        if (!email) return;
         const contactRepository = AppDataSource.getRepository(Contact);
-        return await contactRepository.findOneBy({email} );
+        return await contactRepository.findOneBy({ email });
     }
 
-    async getAllByPhone(phoneNumber: string): Promise<Contact> {
+    async getByPhone(phoneNumber: string): Promise<Contact> {
         if (!phoneNumber) return;
         const contactRepository = AppDataSource.getRepository(Contact);
-        return await contactRepository.findOneBy({phoneNumber} );
+        return await contactRepository.findOneBy({ phoneNumber });
     }
-
 }
